@@ -1,81 +1,81 @@
 # MTML — Music Text Markup Language
-**Format de notation musicale textuelle pour génération IA → MIDI**
+**Text-based music notation format for AI generation → MIDI**
 Version 1.0
 
 ---
 
-## Vue d'ensemble
+## Overview
 
-MTML est un format texte hiérarchique et lisible conçu pour représenter des compositions musicales complètes ou partielles. Il est optimisé pour la génération par LLM et la conversion automatique vers MIDI.
+MTML is a hierarchical, human-readable text format designed to represent complete or partial musical compositions. It is optimized for generation by LLMs and for automatic conversion to MIDI.
 
-**Principes fondateurs :**
-- Chaque ligne commence par un mot-clé (pas d'ambiguïté grammaticale)
-- Les paramètres sont en paires `clé=valeur`
-- Tout champ non reconnu est ignoré silencieusement (extensible)
-- Les commentaires (`#`) sont autorisés partout
-
----
-
-## Structure globale
-
-Un fichier MTML est composé de blocs imbriqués dans cet ordre canonique :
-
-```
-@SONG       ← (1) Un seul bloc global obligatoire
-  @TRACK    ← (N) Un ou plusieurs tracks
-    @BAR    ← (M) Une ou plusieurs mesures par track
-      N / CHORD / CC / REST   ← événements
-```
+**Core principles:**
+- Every line starts with a keyword (no grammatical ambiguity)
+- Parameters are `key=value` pairs
+- Any unrecognized field is silently ignored (extensible)
+- Comments (`#`) are allowed anywhere
 
 ---
 
-## 1. Bloc `@SONG` — En-tête global
+## Global structure
 
-Déclare les paramètres globaux de la composition. **Obligatoire, unique, en première ligne.**
-
-```
-@SONG tempo=<bpm> time=<num>/<den> key=<tonalité> ppq=<ticks> [bars=<n>] [title="<texte>"]
-```
-
-### Paramètres
-
-| Paramètre | Type | Obligatoire | Description |
-|-----------|------|-------------|-------------|
-| `tempo` | entier | oui | Battements par minute (ex. `120`) |
-| `time` | fraction | oui | Signature rythmique (ex. `4/4`, `3/4`, `6/8`) |
-| `key` | string | oui | Tonalité (ex. `Cmaj`, `Amin`, `F#maj`, `Bbmin`) |
-| `ppq` | entier | oui | Ticks par noire (résolution). Valeur recommandée : `480` |
-| `bars` | entier | non | Nombre total de mesures (informatif) |
-| `title` | string | non | Titre de la composition |
-
-### Exemple
+An MTML file is made of nested blocks in this canonical order:
 
 ```
-@SONG tempo=120 time=4/4 key=Cmaj ppq=480 bars=8 title="Étude en Do"
+@SONG       ← (1) A single mandatory global block
+  @TRACK    ← (N) One or more tracks
+    @BAR    ← (M) One or more bars per track
+      N / CHORD / CC / REST   ← events
 ```
 
 ---
 
-## 2. Bloc `@TRACK` — Piste instrument
+## 1. `@SONG` block — Global header
 
-Déclare une piste MIDI. **Un `@TRACK` par instrument.** Les tracks sont indépendantes et jouées simultanément.
+Declares the global parameters of the composition. **Mandatory, unique, on the first line.**
 
 ```
-@TRACK id=<identifiant> ch=<1-16> program=<0-127> [name="<texte>"] [vol=<0-127>] [pan=<0-127>]
+@SONG tempo=<bpm> time=<num>/<den> key=<key> ppq=<ticks> [bars=<n>] [title="<text>"]
 ```
 
-### Paramètres
+### Parameters
 
-| Paramètre | Type | Obligatoire | Description |
-|-----------|------|-------------|-------------|
-| `id` | string | oui | Identifiant unique de la track (ex. `piano`, `bass`, `drums`) |
-| `ch` | entier 1–16 | oui | Canal MIDI. **Canal 10 réservé aux percussions GM** |
-| `program` | entier 0–127 | oui | Numéro de programme GM (instrument). Voir table GM ci-dessous |
-| `name` | string | non | Nom affiché dans le DAW |
-| `vol` | entier 0–127 | non | Volume initial (CC7). Défaut : `100` |
-| `pan` | entier 0–127 | non | Panoramique (CC10). Centre : `64`, gauche : `0`, droite : `127` |
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `tempo` | integer | yes | Beats per minute (e.g. `120`) |
+| `time` | fraction | yes | Time signature (e.g. `4/4`, `3/4`, `6/8`) |
+| `key` | string | yes | Key (e.g. `Cmaj`, `Amin`, `F#maj`, `Bbmin`) |
+| `ppq` | integer | yes | Ticks per quarter note (resolution). Recommended value: `480` |
+| `bars` | integer | no | Total number of bars (informative) |
+| `title` | string | no | Title of the composition |
 
-### Programmes GM fréquents
+### Example
+
+```
+@SONG tempo=120 time=4/4 key=Cmaj ppq=480 bars=8 title="Study in C"
+```
+
+---
+
+## 2. `@TRACK` block — Instrument track
+
+Declares a MIDI track. **One `@TRACK` per instrument.** Tracks are independent and played simultaneously.
+
+```
+@TRACK id=<identifier> ch=<1-16> program=<0-127> [name="<text>"] [vol=<0-127>] [pan=<0-127>]
+```
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | string | yes | Unique track identifier (e.g. `piano`, `bass`, `drums`) |
+| `ch` | integer 1–16 | yes | MIDI channel. **Channel 10 is reserved for GM percussion** |
+| `program` | integer 0–127 | yes | GM program number (instrument). See GM table below |
+| `name` | string | no | Name displayed in the DAW |
+| `vol` | integer 0–127 | no | Initial volume (CC7). Default: `100` |
+| `pan` | integer 0–127 | no | Panning (CC10). Center: `64`, left: `0`, right: `127` |
+
+### Common GM programs
 
 | Program | Instrument | Program | Instrument |
 |---------|------------|---------|------------|
@@ -83,9 +83,9 @@ Déclare une piste MIDI. **Un `@TRACK` par instrument.** Les tracks sont indépe
 | `25` | Acoustic Guitar (steel) | `33` | Electric Bass (finger) |
 | `40` | Violin | `48` | String Ensemble 1 |
 | `56` | Trumpet | `73` | Flute |
-| `0` (ch=10) | Percussions GM | — | — |
+| `0` (ch=10) | GM Percussion | — | — |
 
-### Exemple
+### Example
 
 ```
 @TRACK id=piano ch=1 program=0 name="Grand Piano" vol=90 pan=64
@@ -95,23 +95,23 @@ Déclare une piste MIDI. **Un `@TRACK` par instrument.** Les tracks sont indépe
 
 ---
 
-## 3. Bloc `@BAR` — Mesure
+## 3. `@BAR` block — Bar
 
-Regroupe les événements d'une mesure. **Contenu dans un `@TRACK`.**
+Groups the events of one bar. **Contained in a `@TRACK`.**
 
 ```
-@BAR <numéro> [chord=<symbole>] [time=<num>/<den>]
+@BAR <number> [chord=<symbol>] [time=<num>/<den>]
 ```
 
-### Paramètres
+### Parameters
 
-| Paramètre | Type | Obligatoire | Description |
-|-----------|------|-------------|-------------|
-| `<numéro>` | entier | oui | Numéro de mesure, commence à `1` |
-| `chord` | string | non | Accord de référence de la mesure (ex. `Cmaj`, `G7`, `Dm7`, `F#dim`) |
-| `time` | fraction | non | Signature locale (si différente du `@SONG`) |
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `<number>` | integer | yes | Bar number, starts at `1` |
+| `chord` | string | no | Reference chord of the bar (e.g. `Cmaj`, `G7`, `Dm7`, `F#dim`) |
+| `time` | fraction | no | Local time signature (if different from `@SONG`) |
 
-### Exemple
+### Example
 
 ```
 @BAR 1 chord=Cmaj
@@ -120,66 +120,66 @@ Regroupe les événements d'une mesure. **Contenu dans un `@TRACK`.**
 
 ---
 
-## 4. Événements — Notes et silences
+## 4. Events — Notes and rests
 
-### 4.1 Note : `N`
+### 4.1 Note: `N`
 
-Événement de note unique.
+Single note event.
 
 ```
 N <pitch> <duration> <velocity> [options]
 ```
 
-#### Pitch — Hauteur
+#### Pitch
 
-Format : `<note><altération><octave>`
+Format: `<note><accidental><octave>`
 
-- Notes : `C D E F G A B`
-- Altérations : `#` (dièse), `b` (bémol). Pas de double altération.
-- Octave : entier, `C4` = Do médium (MIDI 60)
+- Notes: `C D E F G A B`
+- Accidentals: `#` (sharp), `b` (flat). No double accidentals.
+- Octave: integer, `C4` = middle C (MIDI 60)
 
-Exemples valides : `C4`, `F#3`, `Bb5`, `G2`, `A#4`, `Eb6`
+Valid examples: `C4`, `F#3`, `Bb5`, `G2`, `A#4`, `Eb6`
 
-#### Duration — Durée
+#### Duration
 
-Valeurs symboliques (relatives à la signature du `@SONG`) :
+Symbolic values (expressed in quarter notes):
 
-| Valeur | Nom | Durée relative |
-|--------|-----|----------------|
-| `4` | Ronde | 4 noires |
-| `2` | Blanche | 2 noires |
-| `1` | Noire | 1 noire |
-| `1/2` | Croche | 1/2 noire |
-| `1/4` | Double croche | 1/4 noire |
-| `1/8` | Triple croche | 1/8 noire |
-| `1.5` | Noire pointée | 1,5 noire |
-| `3/4` | Croche pointée | 3/4 noire |
+| Value | Name | Relative duration |
+|-------|------|-------------------|
+| `4` | Whole note | 4 quarter notes |
+| `2` | Half note | 2 quarter notes |
+| `1` | Quarter note | 1 quarter note |
+| `1/2` | Eighth note | 1/2 quarter note |
+| `1/4` | Sixteenth note | 1/4 quarter note |
+| `1/8` | Thirty-second note | 1/8 quarter note |
+| `1.5` | Dotted quarter note | 1.5 quarter notes |
+| `3/4` | Dotted eighth note | 3/4 quarter note |
 
-Ou en ticks absolus : `t240` (= 1/2 noire à 480 PPQ)
+Or in absolute ticks: `t240` (= 1/2 quarter note at 480 PPQ)
 
-#### Velocity — Vélocité
+#### Velocity
 
-Entier `0–127`. Références indicatives :
+Integer `0–127`. Indicative references:
 - `pp` → `30–40` | `p` → `50–60` | `mp` → `65–75`
 - `mf` → `80–90` | `f` → `100–110` | `ff` → `115–127`
 
-#### Options facultatives
+#### Optional options
 
-| Option | Description | Exemple |
+| Option | Description | Example |
 |--------|-------------|---------|
-| `tie` | Lie cette note à la suivante (même pitch) | `N C4 1 80 tie` |
-| `bend=<cents>` | Pitch bend en centièmes (−200 à +200) | `N E4 1 75 bend=+50` |
-| `cc<n>=<val>` | Control Change inline sur cette note | `N G3 2 90 cc7=64` |
+| `tie` | Ties this note to the next one (same pitch) | `N C4 1 80 tie` |
+| `bend=<cents>` | Pitch bend in cents (−200 to +200) | `N E4 1 75 bend=+50` |
+| `cc<n>=<val>` | Inline Control Change on this note | `N G3 2 90 cc7=64` |
 
-#### Notes simultanées (polyphonie)
+#### Simultaneous notes (polyphony)
 
-Plusieurs notes jouées en même temps sont séparées par `|` sur la même ligne :
+Several notes played at the same time are separated by `|` on the same line:
 
 ```
 N C4 1 80 | N E4 1 75 | N G4 1 70
 ```
 
-#### Exemple complet
+#### Full example
 
 ```
 @BAR 1 chord=Cmaj
@@ -193,38 +193,38 @@ N C4 1 80 | N E4 1 75 | N G4 1 70
 
 ---
 
-### 4.2 Accord : `CHORD`
+### 4.2 Chord: `CHORD`
 
-Génère automatiquement un accord à partir de son symbole. Le parser déduit les notes selon la voix standard (position fondamentale, octave 4 par défaut).
+Automatically generates a chord from its symbol. The parser derives the notes using the standard voicing (root position, octave 4 by default).
 
 ```
-CHORD <symbole> <duration> <velocity> [voicing=<type>] [oct=<n>]
+CHORD <symbol> <duration> <velocity> [voicing=<type>] [oct=<n>]
 ```
 
-#### Symboles d'accords supportés
+#### Supported chord symbols
 
-| Suffixe | Type | Exemple |
-|---------|------|---------|
-| *(aucun)* | Majeur | `C`, `F#` |
-| `maj` | Majeur | `Cmaj` |
-| `min` ou `m` | Mineur | `Amin`, `Am` |
-| `7` | Dominante 7e | `G7` |
-| `maj7` | Majeur 7e | `Cmaj7` |
-| `m7` | Mineur 7e | `Dm7` |
-| `dim` | Diminué | `Bdim` |
-| `aug` | Augmenté | `Eaug` |
-| `sus2` / `sus4` | Suspendu | `Gsus4` |
-| `9`, `m9`, `maj9` | 9e | `C9` |
-| `/X` | Basse spécifique | `G7/B`, `C/E` |
+| Suffix | Type | Example |
+|--------|------|---------|
+| *(none)* | Major | `C`, `F#` |
+| `maj` | Major | `Cmaj` |
+| `min` or `m` | Minor | `Amin`, `Am` |
+| `7` | Dominant 7th | `G7` |
+| `maj7` | Major 7th | `Cmaj7` |
+| `m7` | Minor 7th | `Dm7` |
+| `dim` | Diminished | `Bdim` |
+| `aug` | Augmented | `Eaug` |
+| `sus2` / `sus4` | Suspended | `Gsus4` |
+| `9`, `m9`, `maj9` | 9th | `C9` |
+| `/X` | Specific bass note | `G7/B`, `C/E` |
 
 #### Options
 
-| Option | Valeurs | Description |
-|--------|---------|-------------|
-| `voicing` | `close` (défaut), `open`, `drop2` | Disposition des voix |
-| `oct` | entier | Octave de la fondamentale (défaut : `4`) |
+| Option | Values | Description |
+|--------|--------|-------------|
+| `voicing` | `close` (default), `open`, `drop2` | Voice layout |
+| `oct` | integer | Octave of the root (default: `4`) |
 
-#### Exemple
+#### Example
 
 ```
 @BAR 3 chord=Dm7
@@ -234,13 +234,13 @@ CHORD <symbole> <duration> <velocity> [voicing=<type>] [oct=<n>]
 
 ---
 
-### 4.3 Silence : `REST`
+### 4.3 Rest: `REST`
 
 ```
 REST <duration>
 ```
 
-Exemple :
+Example:
 
 ```
 REST 1/2
@@ -248,27 +248,27 @@ REST 1/2
 
 ---
 
-### 4.4 Control Change : `CC`
+### 4.4 Control Change: `CC`
 
-Envoie un message MIDI Control Change, positionné en ticks dans la mesure.
+Sends a MIDI Control Change message, positioned in ticks within the bar.
 
 ```
-CC <numéro> <valeur> [t<position>]
+CC <number> <value> [t<position>]
 ```
 
-- `<position>` : position en ticks depuis le début de la mesure (défaut : `t0`)
+- `<position>`: position in ticks from the start of the bar (default: `t0`)
 
-#### CC fréquents
+#### Common CCs
 
-| N° | Nom |
-|----|-----|
+| No. | Name |
+|-----|------|
 | `1` | Modulation wheel |
 | `7` | Volume |
 | `10` | Pan |
 | `11` | Expression |
 | `64` | Sustain pedal (0=off, 127=on) |
 
-#### Exemple
+#### Example
 
 ```
 @BAR 4
@@ -279,11 +279,11 @@ CC <numéro> <valeur> [t<position>]
 
 ---
 
-## 5. Percussions GM (canal 10)
+## 5. GM Percussion (channel 10)
 
-Sur le canal 10, le pitch ne désigne pas une hauteur mais un type de percussion :
+On channel 10, the pitch does not designate a pitch but a percussion sound:
 
-| Pitch MIDI | Note MTML | Percussion |
+| MIDI pitch | MTML note | Percussion |
 |------------|-----------|------------|
 | 35 | `B1` | Acoustic Bass Drum |
 | 36 | `C2` | Bass Drum 1 |
@@ -293,7 +293,7 @@ Sur le canal 10, le pitch ne désigne pas une hauteur mais un type de percussion
 | 49 | `C#3` | Crash Cymbal 1 |
 | 51 | `Eb3` | Ride Cymbal 1 |
 
-#### Exemple groove basique
+#### Basic groove example
 
 ```
 @TRACK id=drums ch=10 program=0 name="Drums"
@@ -306,35 +306,35 @@ Sur le canal 10, le pitch ne désigne pas une hauteur mais un type de percussion
 
 ---
 
-## 6. Commentaires
+## 6. Comments
 
-Le caractère `#` en début ou milieu de ligne introduit un commentaire ignoré au parsing.
+The `#` character at the start or in the middle of a line introduces a comment that is ignored during parsing.
 
 ```
-# Ceci est un commentaire
-@BAR 1 chord=Cmaj  # commentaire inline
-  N C4 1 80        # do médium, forte
+# This is a comment
+@BAR 1 chord=Cmaj  # inline comment
+  N C4 1 80        # middle C, forte
 ```
 
 ---
 
-## 7. Règles de parsing
+## 7. Parsing rules
 
-1. **Mot-clé obligatoire en début de ligne** (après espaces optionnels) : `@SONG`, `@TRACK`, `@BAR`, `N`, `CHORD`, `REST`, `CC`
-2. **Lignes vides ignorées**
-3. **Commentaires ignorés** (de `#` à fin de ligne)
-4. **Clés inconnues ignorées** silencieusement (forward-compatibility)
-5. **Ordre canonique** : `@SONG` → `@TRACK` → `@BAR` → événements
-6. **Polyphonie** : `|` sépare des notes simultanées sur une même ligne ; elles partagent position et durée déclarées
-7. **Position dans la mesure** : les événements s'enchaînent séquentiellement, la position courante avançant de la durée de chaque événement (ou du maximum en cas de polyphonie `|`)
+1. **Mandatory keyword at the start of a line** (after optional whitespace): `@SONG`, `@TRACK`, `@BAR`, `N`, `CHORD`, `REST`, `CC`
+2. **Empty lines are ignored**
+3. **Comments are ignored** (from `#` to end of line)
+4. **Unknown keys are silently ignored** (forward compatibility)
+5. **Canonical order**: `@SONG` → `@TRACK` → `@BAR` → events
+6. **Polyphony**: `|` separates simultaneous notes on the same line; they share the same start position and their declared durations
+7. **Position within the bar**: events follow each other sequentially, the current position advancing by the duration of each event (or by the maximum in the case of `|` polyphony)
 
 ---
 
-## 8. Exemple complet
+## 8. Full example
 
 ```
-# Exemple MTML — 8 mesures, 2 instruments
-@SONG tempo=100 time=4/4 key=Cmaj ppq=480 bars=8 title="Simple étude"
+# MTML example — 8 bars, 2 instruments
+@SONG tempo=100 time=4/4 key=Cmaj ppq=480 bars=8 title="Simple study"
 
 @TRACK id=piano ch=1 program=0 name="Grand Piano" vol=88 pan=64
 
@@ -411,39 +411,39 @@ Le caractère `#` en début ou milieu de ligne introduit un commentaire ignoré 
 
 ---
 
-## 9. Erreurs et récupération
+## 9. Errors and recovery
 
-Le parser doit adopter une stratégie de **récupération souple** :
+The parser must adopt a **lenient recovery** strategy:
 
-- **Ligne non reconnue** → log d'avertissement, ligne ignorée, parsing continue
-- **Paramètre manquant obligatoire** → valeur par défaut si possible, sinon bloc ignoré
-- **Pitch invalide** → note ignorée, warning
-- **Duration invalide** → durée = `1` (noire) par défaut, warning
-- **Velocity hors [0-127]** → clampée à `0` ou `127`
+- **Unrecognized line** → warning logged, line ignored, parsing continues
+- **Missing required parameter** → default value if possible, otherwise the block is ignored
+- **Invalid pitch** → note ignored, warning
+- **Invalid duration** → duration = `1` (quarter note) by default, warning
+- **Velocity outside [0-127]** → clamped to `0` or `127`
 
 ---
 
-## 10. Conversion en ticks MIDI
+## 10. Conversion to MIDI ticks
 
 ```
 ticks = duration_value × ppq
 
-Exemples à ppq=480 :
-  Ronde (4)    → 4 × 480 = 1920 ticks
-  Blanche (2)  → 2 × 480 = 960 ticks
-  Noire (1)    → 1 × 480 = 480 ticks
-  Croche (1/2) → 0.5 × 480 = 240 ticks
-  Double croche (1/4) → 0.25 × 480 = 120 ticks
+Examples at ppq=480:
+  Whole note (4)      → 4 × 480 = 1920 ticks
+  Half note (2)       → 2 × 480 = 960 ticks
+  Quarter note (1)    → 1 × 480 = 480 ticks
+  Eighth note (1/2)   → 0.5 × 480 = 240 ticks
+  Sixteenth (1/4)     → 0.25 × 480 = 120 ticks
 ```
 
-La position absolue d'un événement dans le fichier MIDI = `(bar - 1) × ticks_per_bar + position_dans_mesure`
+The absolute position of an event in the MIDI file = `(bar - 1) × ticks_per_bar + position_in_bar`
 
 ```
 ticks_per_bar = (num / den) × 4 × ppq
-Exemple 4/4 à ppq=480 : (4/4) × 4 × 480 = 1920 ticks par mesure
-Exemple 3/4 à ppq=480 : (3/4) × 4 × 480 = 1440 ticks par mesure
+Example 4/4 at ppq=480: (4/4) × 4 × 480 = 1920 ticks per bar
+Example 3/4 at ppq=480: (3/4) × 4 × 480 = 1440 ticks per bar
 ```
 
 ---
 
-*Fin de la spécification MTML v1.0*
+*End of the MTML v1.0 specification*
