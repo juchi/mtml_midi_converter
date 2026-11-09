@@ -481,8 +481,11 @@ def parse_mtml(text: str) -> tuple[SongHeader, list[TrackDef]]:
                 log.warning("Événement '%s' en dehors d'un @BAR, ignoré", keyword)
                 continue
             groups = parse_line_events(line, song.ppq)
-            # On stocke chaque groupe comme un tuple (simultané)
-            current_bar.events.extend(groups)  # type: ignore[arg-type]
+            # All '|'-separated segments of one line start at the same position,
+            # so they are merged into a single simultaneous group.
+            merged = [evt for grp in groups for evt in grp]
+            if merged:
+                current_bar.events.append(merged)  # type: ignore[arg-type]
 
         else:
             log.debug("Ligne ignorée (mot-clé inconnu) : %s", line)

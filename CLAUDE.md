@@ -43,7 +43,6 @@ Two stages, both pure functions:
 
 Verify before relying on these; fix them only when asked.
 
-- **Polyphony with `|` is broken**: `parse_line_events` returns one group per `|` segment and `parse_mtml` extends `bar.events` with all of them, so simultaneous notes are played sequentially (and overflow into the following bars). The groups from one line should be merged into a single group.
 - **Ties across bars don't work**: the `tied` dict is reset for every bar and open ties are closed at bar end, so the spec example (`N C4 1 85 tie` → next bar `N C4 1 85`) retriggers the note.
 - **Mixed time signatures**: bar start uses the *current* bar's length times `(number - 1)`, which is wrong once bars of different lengths coexist. Per-bar `time=` is also not emitted as a MIDI meta event.
 - `@SONG key=` and `@BAR chord=` are parsed but unused (no `key_signature` meta).
