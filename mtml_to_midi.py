@@ -123,26 +123,56 @@ def parse_kv(tokens: list[str]) -> dict[str, str]:
     return result
 
 
+def parse_int(value: Optional[str], default: Optional[int], what: str) -> Optional[int]:
+    """Parse an integer, logging a warning and returning `default` if invalid."""
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        log.warning("Invalid %s: %s, defaulting to %s", what, value, default)
+        return default
+
+
+def clamp_7bit(value: int, what: str) -> int:
+    """Clamp a value to the MIDI data byte range 0–127, with a warning if needed."""
+    clamped = max(0, min(127, value))
+    if clamped != value:
+        log.warning("%s out of range [0-127]: %d, clamped to %d", what, value, clamped)
+    return clamped
+
+
+def parse_time_signature(s: str) -> Optional[tuple[int, int]]:
+    """Parse "num/den" (den must be a power of 2). Return None with a warning if invalid."""
+    parts = s.split("/")
+    if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+        num, den = int(parts[0]), int(parts[1])
+        if num >= 1 and den >= 1 and den & (den - 1) == 0:
+            return num, den
+    log.warning("Invalid time signature: %s, ignored", s)
+    return None
+
+
 def parse_duration(s: str, ppq: int) -> int:
     """
     Convert an MTML duration to ticks.
     Examples: "1" → ppq, "1/2" → ppq//2, "4" → ppq*4, "t240" → 240
+    Invalid, zero or negative durations default to a quarter note.
     """
     s = s.strip()
-    if s.startswith("t"):
-        try:
-            return int(s[1:])
-        except ValueError:
-            log.warning("Invalid tick duration: %s, defaulting to a quarter note", s)
-            return ppq
-
     try:
-        frac = Fraction(s)
-        ticks = int(frac * ppq)
-        return max(1, ticks)
+        if s.startswith("t"):
+            ticks = int(s[1:])
+        else:
+            frac = Fraction(s)
+            # Very short positive durations still last at least one tick
+            ticks = max(1, int(frac * ppq)) if frac > 0 else 0
     except (ValueError, ZeroDivisionError):
+        ticks = 0
+    if ticks <= 0:
         log.warning("Invalid duration: %s, defaulting to a quarter note", s)
         return ppq
+    return ticks
 
 
 def pitch_to_midi(pitch_str: str) -> Optional[int]:
@@ -175,7 +205,7 @@ def parse_chord_symbol(symbol: str, octave: int = 4) -> tuple[Optional[int], lis
     """
     Parse a chord symbol and return (bass_midi, [midi_notes]).
     E.g.: "Cmaj" → (None, [60, 64, 67])
-        "G7/B" → (47, [55, 59, 62, 65])
+        "G7/B" → (59, [67, 71, 74, 77])
     """
     # Specific bass note (slash chord)
     bass_midi: Optional[int] = None
@@ -297,7 +327,11 @@ def parse_note_token_group(tokens: list[str], ppq: int) -> list[MtmlEvent]:
             continue
         cc_m = re.match(r"cc(\d+)=(\d+)", opt)
         if cc_m:
-            inline_cc.append((int(cc_m.group(1)), int(cc_m.group(2))))
+            cc_num = int(cc_m.group(1))
+            if cc_num > 127:
+                log.warning("Invalid CC number: %d, ignored", cc_num)
+                continue
+            inline_cc.append((cc_num, clamp_7bit(int(cc_m.group(2)), "CC value")))
             continue
 
     return [MtmlEvent(
@@ -357,7 +391,7 @@ def parse_chord_line(tokens: list[str], ppq: int) -> list[MtmlEvent]:
     kv       = parse_kv(tokens[4:])
 
     voicing = kv.get("voicing", "close")
-    octave  = int(kv.get("oct", "4"))
+    octave  = parse_int(kv.get("oct"), 4, "chord octave")
 
     bass_midi, notes = parse_chord_symbol(symbol, octave)
     notes = apply_voicing(notes, voicing)
@@ -396,9 +430,12 @@ def parse_cc_line(tokens: list[str], ppq: int) -> Optional[MtmlEvent]:
         return None
     try:
         cc_num = int(tokens[1])
-        cc_val = clamp_velocity(int(tokens[2]))
+        cc_val = clamp_7bit(int(tokens[2]), "CC value")
     except ValueError:
         log.warning("Invalid CC: %s", tokens)
+        return None
+    if not 0 <= cc_num <= 127:
+        log.warning("Invalid CC number: %d, ignored", cc_num)
         return None
 
     cc_pos = 0
@@ -433,28 +470,36 @@ def parse_mtml(text: str) -> tuple[SongHeader, list[TrackDef]]:
         # ---- @SONG ----
         if keyword == "@SONG":
             kv = parse_kv(tokens[1:])
-            song.tempo    = int(kv.get("tempo", 120))
-            song.ppq      = int(kv.get("ppq", 480))
+            song.tempo    = parse_int(kv.get("tempo"), 120, "tempo")
+            song.ppq      = parse_int(kv.get("ppq"), 480, "ppq")
             song.key      = kv.get("key", "Cmaj")
             song.title    = kv.get("title", "")
-            if "bars" in kv:
-                song.bars = int(kv["bars"])
-            time_str = kv.get("time", "4/4")
-            parts = time_str.split("/")
-            if len(parts) == 2:
-                song.time_num, song.time_den = int(parts[0]), int(parts[1])
+            song.bars     = parse_int(kv.get("bars"), None, "bar count")
+            if song.tempo <= 0:
+                log.warning("Invalid tempo: %d, defaulting to 120", song.tempo)
+                song.tempo = 120
+            if song.ppq <= 0:
+                log.warning("Invalid ppq: %d, defaulting to 480", song.ppq)
+                song.ppq = 480
+            if "time" in kv:
+                signature = parse_time_signature(kv["time"])
+                if signature:
+                    song.time_num, song.time_den = signature
 
         # ---- @TRACK ----
         elif keyword == "@TRACK":
             kv = parse_kv(tokens[1:])
-            ch_1based = int(kv.get("ch", 1))
+            ch_1based = parse_int(kv.get("ch"), 1, "channel")
+            if not 1 <= ch_1based <= 16:
+                log.warning("Invalid channel: %d, defaulting to 1", ch_1based)
+                ch_1based = 1
             current_track = TrackDef(
                 id       = kv.get("id", f"track{len(tracks)}"),
                 channel  = ch_1based - 1,   # MIDI 0-based
-                program  = int(kv.get("program", 0)),
+                program  = clamp_7bit(parse_int(kv.get("program"), 0, "program"), "program"),
                 name     = kv.get("name", ""),
-                volume   = int(kv.get("vol", 100)),
-                pan      = int(kv.get("pan", 64)),
+                volume   = clamp_7bit(parse_int(kv.get("vol"), 100, "volume"), "volume"),
+                pan      = clamp_7bit(parse_int(kv.get("pan"), 64, "pan"), "pan"),
             )
             tracks.append(current_track)
             current_bar = None
@@ -465,13 +510,17 @@ def parse_mtml(text: str) -> tuple[SongHeader, list[TrackDef]]:
                 log.warning("@BAR without a preceding @TRACK, ignored")
                 continue
             kv = parse_kv(tokens[2:])
-            bar_num = int(tokens[1]) if len(tokens) > 1 else 1
+            bar_num = parse_int(tokens[1] if len(tokens) > 1 else None, None, "bar number")
+            if bar_num is None or bar_num < 1:
+                # The bar number is mandatory: ignore the bar and its events
+                log.warning("Invalid or missing bar number: %s, bar ignored", line)
+                current_bar = None
+                continue
             bar = BarDef(number=bar_num, chord=kv.get("chord", ""))
             if "time" in kv:
-                parts = kv["time"].split("/")
-                if len(parts) == 2:
-                    bar.time_num = int(parts[0])
-                    bar.time_den = int(parts[1])
+                signature = parse_time_signature(kv["time"])
+                if signature:
+                    bar.time_num, bar.time_den = signature
             current_track.bars.append(bar)
             current_bar = bar
 
@@ -497,10 +546,40 @@ def parse_mtml(text: str) -> tuple[SongHeader, list[TrackDef]]:
 # MIDI conversion
 # ---------------------------------------------------------------------------
 
-def ticks_per_bar(song: SongHeader, bar: BarDef) -> int:
-    num = bar.time_num if bar.time_num else song.time_num
-    den = bar.time_den if bar.time_den else song.time_den
-    return int(Fraction(num, den) * 4 * song.ppq)
+def bar_layout(song: SongHeader, tracks: list[TrackDef]) -> tuple[dict[int, int], list[tuple[int, int, int]]]:
+    """
+    Compute the song-wide bar layout.
+
+    A `time=` on a @BAR applies to that bar only (local signature); other bars
+    use the @SONG signature. The signature of a bar is shared by all tracks:
+    if tracks disagree, the first declaration wins.
+
+    Returns:
+        (bar number → absolute start tick, [(tick, numerator, denominator)] of
+        each time signature change, starting at tick 0)
+    """
+    default = (song.time_num, song.time_den)
+    declared: dict[int, tuple[int, int]] = {}
+    last_bar = 1
+    for track in tracks:
+        for bar in track.bars:
+            last_bar = max(last_bar, bar.number)
+            if bar.time_num and bar.time_den:
+                signature = (bar.time_num, bar.time_den)
+                if declared.setdefault(bar.number, signature) != signature:
+                    log.warning("Conflicting time signature %d/%d for bar %d in track '%s', ignored",
+                                *signature, bar.number, track.id)
+
+    starts: dict[int, int] = {}
+    changes: list[tuple[int, int, int]] = []
+    tick = 0
+    for number in range(1, last_bar + 1):
+        num, den = declared.get(number, default)
+        if not changes or changes[-1][1:] != (num, den):
+            changes.append((tick, num, den))
+        starts[number] = tick
+        tick += int(Fraction(num, den) * 4 * song.ppq)
+    return starts, changes
 
 
 def tempo_to_microseconds(bpm: int) -> int:
@@ -520,17 +599,19 @@ def bend_cents_to_midi(cents: int) -> int:
 
 def build_midi(song: SongHeader, tracks: list[TrackDef]) -> mido.MidiFile:
     mid = mido.MidiFile(type=1, ticks_per_beat=song.ppq)
+    bar_starts, signature_changes = bar_layout(song, tracks)
 
-    # Track 0: tempo + global metadata
+    # Track 0: tempo, time signatures + global metadata
     meta_track = mido.MidiTrack()
     mid.tracks.append(meta_track)
-    meta_track.append(mido.MetaMessage("set_tempo", tempo=tempo_to_microseconds(song.tempo), time=0))
-    meta_track.append(mido.MetaMessage("time_signature",
-        numerator=song.time_num,
-        denominator=song.time_den,
-        time=0))
     if song.title:
         meta_track.append(mido.MetaMessage("track_name", name=song.title, time=0))
+    meta_track.append(mido.MetaMessage("set_tempo", tempo=tempo_to_microseconds(song.tempo), time=0))
+    prev_tick = 0
+    for tick, num, den in signature_changes:
+        meta_track.append(mido.MetaMessage("time_signature",
+            numerator=num, denominator=den, time=tick - prev_tick))
+        prev_tick = tick
     meta_track.append(mido.MetaMessage("end_of_track", time=0))
 
     for track_def in tracks:
@@ -553,12 +634,17 @@ def build_midi(song: SongHeader, tracks: list[TrackDef]) -> mido.MidiFile:
         # Build the message list as (absolute tick, message)
         abs_messages: list[tuple[int, mido.Message]] = []
 
-        for bar in track_def.bars:
-            bar_start_abs = (bar.number - 1) * ticks_per_bar(song, bar)
-            cursor = 0   # position relative to the bar start (ticks)
+        def note_off(tick: int, note: int) -> None:
+            abs_messages.append((tick, mido.Message(
+                "note_off", channel=ch, note=note, velocity=0)))
 
-            # Ties: pitch → tick of the note_on
-            tied: dict[int, int] = {}
+        # Pending ties, kept across bars: pitch → end tick of the tied note,
+        # i.e. where the continuation note must start.
+        open_ties: dict[int, int] = {}
+
+        for bar in track_def.bars:
+            bar_start_abs = bar_starts[bar.number]
+            cursor = 0   # position relative to the bar start (ticks)
 
             for event_or_group in bar.events:
                 # Normalize: each item of bar.events is either an MtmlEvent
@@ -585,14 +671,15 @@ def build_midi(song: SongHeader, tracks: list[TrackDef]) -> mido.MidiFile:
                         continue
 
                     # kind == "note"
-                    # Pitch bend
+                    # Pitch bend applies to this note only: reset it when the note ends.
+                    # Bend is channel-wide, so it also affects notes sounding with it.
                     if evt.bend_cents != 0:
                         bend_val = bend_cents_to_midi(evt.bend_cents)
-                        lsb = bend_val & 0x7F
-                        msb = (bend_val >> 7) & 0x7F
                         abs_messages.append((abs_pos, mido.Message(
                             "pitchwheel", channel=ch,
                             pitch=bend_val - 8192)))  # mido expects -8192..8191
+                        abs_messages.append((abs_pos + evt.duration_ticks, mido.Message(
+                            "pitchwheel", channel=ch, pitch=0)))
 
                     # Inline CC
                     for cc_num, cc_val in evt.inline_cc:
@@ -600,38 +687,33 @@ def build_midi(song: SongHeader, tracks: list[TrackDef]) -> mido.MidiFile:
                             "control_change", channel=ch,
                             control=cc_num, value=cc_val)))
 
-                    note_on_tick = abs_pos
-                    note_off_tick = abs_pos + evt.duration_ticks
+                    note_end = abs_pos + evt.duration_ticks
+
+                    # A pending tie on this pitch is continued only if this note
+                    # starts exactly where the tied note ends; otherwise the tied
+                    # note is closed at its own end (or here, if this note overlaps it).
+                    tie_end = open_ties.pop(evt.midi_note, None)
+                    if tie_end is not None and tie_end != abs_pos:
+                        note_off(min(tie_end, abs_pos), evt.midi_note)
+                        tie_end = None
+
+                    if tie_end is None:
+                        abs_messages.append((abs_pos, mido.Message(
+                            "note_on", channel=ch,
+                            note=evt.midi_note, velocity=evt.velocity)))
 
                     if evt.tie:
-                        # Remember it to extend the note
-                        tied[evt.midi_note] = note_on_tick
-                        abs_messages.append((note_on_tick, mido.Message(
-                            "note_on", channel=ch,
-                            note=evt.midi_note, velocity=evt.velocity)))
-                    elif evt.midi_note in tied:
-                        # End of tie: emit only the note_off
-                        abs_messages.append((note_off_tick, mido.Message(
-                            "note_off", channel=ch,
-                            note=evt.midi_note, velocity=0)))
-                        del tied[evt.midi_note]
+                        open_ties[evt.midi_note] = note_end
                     else:
-                        abs_messages.append((note_on_tick, mido.Message(
-                            "note_on", channel=ch,
-                            note=evt.midi_note, velocity=evt.velocity)))
-                        abs_messages.append((note_off_tick, mido.Message(
-                            "note_off", channel=ch,
-                            note=evt.midi_note, velocity=0)))
+                        note_off(note_end, evt.midi_note)
 
                     max_dur = max(max_dur, evt.duration_ticks)
 
                 cursor += max_dur
 
-            # Close ties still open at the end of the bar
-            bar_end = bar_start_abs + ticks_per_bar(song, bar)
-            for note, _ in tied.items():
-                abs_messages.append((bar_end, mido.Message(
-                    "note_off", channel=ch, note=note, velocity=0)))
+        # Tied notes never continued end at their own duration
+        for note, tie_end in open_ties.items():
+            note_off(tie_end, note)
 
         # Sort by absolute tick, note_off before note_on at the same tick
         def sort_key(item: tuple[int, mido.Message]) -> tuple[int, int]:

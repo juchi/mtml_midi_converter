@@ -7,18 +7,19 @@ Guidance for Claude Code when working in this repository.
 Single-file Python tool converting MTML (Music Text Markup Language, a text music notation designed for LLM generation) into MIDI.
 
 - `MTML_spec.md` — format specification v1.0. **Source of truth** for the format.
-- `mtml_to_midi.py` — parser + MIDI writer + CLI. Only dependency: `mido`.
-
-There are no tests, no packaging (`requirements.txt` / `pyproject.toml`) and no sample `.mtml` files in the repo yet.
+- `mtml_to_midi.py` — parser + MIDI writer + CLI. Only runtime dependency: `mido`.
+- `tests/test_mtml_to_midi.py` — pytest conformance suite against the spec.
+- `examples/simple_study.mtml` — the complete example of spec section 8 (also used by the end-to-end test).
 
 ## Commands
 
 ```bash
-pip install mido
+pip install -r requirements-dev.txt          # mido + pytest
+python -m pytest                             # run the test suite (config in pytest.ini)
 python mtml_to_midi.py input.mtml output.mid [--verbose]
 ```
 
-Quick smoke test: the complete example in section 8 of `MTML_spec.md` is a valid input. On Windows, set `PYTHONIOENCODING=utf-8` if the console chokes on the `✓` printed on success.
+On Windows, set `PYTHONIOENCODING=utf-8` if the console chokes on the `✓` printed on success.
 
 ## Architecture (`mtml_to_midi.py`)
 
@@ -31,24 +32,27 @@ Two stages, both pure functions:
    - Durations are converted to ticks at parse time (`parse_duration`), so `@SONG ppq=` must appear before events.
    - Channels are stored **0-based** in `TrackDef.channel` (spec uses 1–16).
    - `CHORD` is expanded into notes at parse time (`parse_chord_symbol` + `apply_voicing`, intervals in `CHORD_INTERVALS`).
-   - `BarDef.events` holds *groups* (`list[MtmlEvent]`); events in one group are meant to start at the same position.
+   - `BarDef.events` holds *groups* (`list[MtmlEvent]`): all `|`-separated events of one line form one group and start at the same position.
 2. **Build** — `build_midi(song, tracks) -> mido.MidiFile`
-   - Type 1 file: track 0 = tempo / time signature / title, then one track per `@TRACK`.
-   - Events are collected as `(absolute_tick, message)`, sorted (note_off before note_on at equal ticks), then converted to delta times.
-   - Bar start = `(bar.number - 1) * ticks_per_bar`; a group advances the cursor by its longest duration; `CC` uses its own `t<pos>` and does not advance the cursor.
+   - `bar_layout()` computes song-wide bar start ticks and time signature changes, shared by all tracks.
+   - Type 1 file: track 0 = title / tempo / time signature changes, then one track per `@TRACK`.
+   - Events are collected as `(absolute_tick, message)`, sorted (note_off before anything else at equal ticks, otherwise stable), then converted to delta times.
+   - A group advances the cursor by its longest duration; `CC` uses its own `t<pos>` and does not advance the cursor.
 
 `convert()` and `main()` are thin wrappers (public API + argparse CLI).
 
-## Known bugs / gaps vs. the spec
+## Interpretation choices (where the spec is silent)
 
-Verify before relying on these; fix them only when asked.
+- **Ties**: a `tie` note is extended by the next note of the same pitch only if that note starts exactly at the tied note's end (works across bars and in chains). Otherwise the tied note ends at its own duration.
+- **Pitch bend** applies to its note only: a reset to center is emitted when the note ends. Bend is channel-wide in MIDI, so it also affects other notes sounding at the same time.
+- **`@BAR time=`** applies to that bar only, then the `@SONG` signature resumes. A bar's signature is shared by all tracks; on conflict, the first declaration wins (with a warning).
+- **Invalid values** (spec section 9): out-of-range program / vol / pan / CC values are clamped to 0–127; invalid channel, tempo, ppq or chord octave fall back to defaults; invalid CC numbers are ignored; a missing, non-numeric or < 1 bar number ignores the bar and its events; zero, negative or invalid durations default to a quarter note.
 
-- **Ties across bars don't work**: the `tied` dict is reset for every bar and open ties are closed at bar end, so the spec example (`N C4 1 85 tie` → next bar `N C4 1 85`) retriggers the note.
-- **Mixed time signatures**: bar start uses the *current* bar's length times `(number - 1)`, which is wrong once bars of different lengths coexist. Per-bar `time=` is also not emitted as a MIDI meta event.
+## Known gaps vs. the spec
+
 - `@SONG key=` and `@BAR chord=` are parsed but unused (no `key_signature` meta).
-- `REST` inside a `|` group, and notes longer than the bar, are not validated.
+- Bar overflow (events longer than the bar) is not validated: they spill into the next bar.
 - `--verbose` sets DEBUG; WARNINGs are always shown, and the success message is itself logged as a WARNING.
-- Unused `lsb` / `msb` variables in the pitch-bend code.
 
 ## Conventions
 
@@ -56,3 +60,4 @@ Verify before relying on these; fix them only when asked.
 - Keep the lenient error strategy from spec section 9: warn and continue, never crash on bad input lines.
 - Unknown keys/keywords must stay silently ignored (forward compatibility).
 - When changing the format, update `MTML_spec.md` alongside the code.
+- Every behavior change comes with a test in `tests/test_mtml_to_midi.py`; expected values are derived from the spec, not from the current output.

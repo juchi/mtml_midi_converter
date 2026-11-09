@@ -10,7 +10,7 @@ MTML is a line-based, human-readable text format for music notation, designed to
 - [`mido`](https://mido.readthedocs.io/)
 
 ```bash
-pip install mido
+pip install -r requirements.txt
 ```
 
 ## Usage
@@ -20,6 +20,7 @@ pip install mido
 ```bash
 python mtml_to_midi.py input.mtml output.mid
 python mtml_to_midi.py input.mtml output.mid --verbose   # also show debug logs
+python mtml_to_midi.py examples/simple_study.mtml simple_study.mid   # try the bundled example
 ```
 
 On success it prints the output path, the number of tracks and the approximate duration.
@@ -77,11 +78,20 @@ Parsing is lenient: unknown keys and keywords are ignored, invalid values fall b
 ## Output
 
 - MIDI type 1, resolution = `ppq`.
-- Track 0 holds tempo, time signature and title; one MIDI track per `@TRACK` follows.
+- Track 0 holds the title, tempo and time signature changes; one MIDI track per `@TRACK` follows.
 - Each track starts with its program change plus CC7 (volume) and CC10 (pan).
+
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+The suite in `tests/` checks the converter against every section of the spec, with expected values derived by hand from it.
 
 ## Known limitations
 
 - The `key` of `@SONG` and the `chord` of `@BAR` are parsed but not written to the MIDI file.
-- Per-bar `time=` changes are not emitted as MIDI time-signature events.
-- See [`CLAUDE.md`](CLAUDE.md) for implementation gaps relative to the spec.
+- A `time=` on a `@BAR` applies to that bar only, and is shared by all tracks.
+- See [`CLAUDE.md`](CLAUDE.md) for the interpretation choices made where the spec is silent.
