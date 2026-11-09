@@ -1,0 +1,74 @@
+# MTML example — 8 bars, 2 instruments
+@SONG tempo=100 time=4/4 key=Cmaj ppq=480 bars=8 title="Simple study"
+
+@TRACK id=piano ch=1 program=0 name="Grand Piano" vol=88 pan=64
+
+  @BAR 1 chord=Cmaj
+    N C4 1 80 | N E4 1 75 | N G4 1 70
+    N C4 1 85
+
+  @BAR 2 chord=G7
+    N G3 1 78 | N B3 1 74 | N D4 1 70 | N F4 1 66
+    N G3 1 80
+
+  @BAR 3 chord=Amin
+    N A3 1 76 | N C4 1 72 | N E4 1 70
+    N A3 1 78
+
+  @BAR 4 chord=F
+    N F3 1 75 | N A3 1 70 | N C4 1 68
+    N F3 1 77
+
+  @BAR 5 chord=Cmaj
+    N C4 1/2 82 | N E4 1/2 78
+    N D4 1/2 75
+    N E4 1/2 78
+    N C4 1   85
+
+  @BAR 6 chord=G7
+    N G4 1/2 80
+    N F4 1/2 76
+    N D4 1/2 73
+    N B3 1   79
+
+  @BAR 7 chord=Amin
+    N A3 2 78 | N C4 2 74 | N E4 2 70
+    REST 2
+
+  @BAR 8 chord=Cmaj
+    N C4 4 90 | N E4 4 85 | N G4 4 80
+
+@TRACK id=bass ch=2 program=32 name="Fingered Bass" vol=85 pan=40
+
+  @BAR 1 chord=Cmaj
+    N C2 1 100
+    N C2 1 95
+
+  @BAR 2 chord=G7
+    N G1 1 98
+    N G1 1 95
+
+  @BAR 3 chord=Amin
+    N A1 1 97
+    N A1 1 93
+
+  @BAR 4 chord=F
+    N F1 1 98
+    N C2 1 95
+
+  @BAR 5 chord=Cmaj
+    N C2 1 100
+    N E2 1/2 90
+    N G2 1/2 88
+
+  @BAR 6 chord=G7
+    N G1 1   100
+    N D2 1/2 90
+    N F2 1/2 88
+
+  @BAR 7 chord=Amin
+    N A1 2 98
+    N E2 2 92
+
+  @BAR 8 chord=Cmaj
+    N C2 4 100
