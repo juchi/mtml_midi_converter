@@ -1,7 +1,7 @@
 """
 mtml_to_midi.py
-Convertisseur MTML v1.0 → MIDI
-Dépendance : mido  (pip install mido)
+MTML v1.0 → MIDI converter
+Dependency: mido  (pip install mido)
 """
 
 from __future__ import annotations
@@ -25,12 +25,12 @@ log = logging.getLogger("mtml")
 
 
 # ---------------------------------------------------------------------------
-# Constantes
+# Constants
 # ---------------------------------------------------------------------------
 
 NOTE_NAMES = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
 
-# Intervalles (demi-tons depuis la fondamentale) pour chaque qualité d'accord
+# Intervals (semitones from the root) for each chord quality
 CHORD_INTERVALS: dict[str, list[int]] = {
     "maj":  [0, 4, 7],
     "min":  [0, 3, 7],
@@ -46,18 +46,18 @@ CHORD_INTERVALS: dict[str, list[int]] = {
     "maj9": [0, 4, 7, 11, 14],
 }
 
-# Regex pour parser un pitch (ex : C4, F#3, Bb5)
+# Regex to parse a pitch (e.g. C4, F#3, Bb5)
 RE_PITCH = re.compile(r"^([A-G])(#|b)?(\d+)$")
 
-# Regex pour parser une durée (ex : 1, 1/2, 1.5, 4, t240)
+# Regex to parse a duration (e.g. 1, 1/2, 1.5, 4, t240)
 RE_DURATION = re.compile(r"^(t\d+|\d+(?:[./]\d+)?)$")
 
-# Regex pour paramètres clé=valeur (gère les valeurs entre guillemets)
+# Regex for key=value parameters (handles quoted values)
 RE_KV = re.compile(r'(\w+)=(?:"([^"]*)"|([\S]+))')
 
 
 # ---------------------------------------------------------------------------
-# Dataclasses internes
+# Internal dataclasses
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -93,19 +93,19 @@ class BarDef:
 
 @dataclass
 class MtmlEvent:
-    """Événement générique : note, REST, CC."""
+    """Generic event: note, REST, CC."""
     kind: str          # "note" | "rest" | "cc"
-    # Pour "note"
+    # For "note"
     midi_note: int = 0
     duration_ticks: int = 0
     velocity: int = 80
     tie: bool = False
     bend_cents: int = 0
     inline_cc: list[tuple[int, int]] = field(default_factory=list)
-    # Pour "cc"
+    # For "cc"
     cc_num: int = 0
     cc_val: int = 0
-    cc_pos_ticks: int = 0      # position relative dans la mesure
+    cc_pos_ticks: int = 0      # position relative to the bar start
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +113,7 @@ class MtmlEvent:
 # ---------------------------------------------------------------------------
 
 def parse_kv(tokens: list[str]) -> dict[str, str]:
-    """Extrait les paires clé=valeur d'une liste de tokens."""
+    """Extract key=value pairs from a list of tokens."""
     result: dict[str, str] = {}
     raw = " ".join(tokens)
     for m in RE_KV.finditer(raw):
@@ -125,15 +125,15 @@ def parse_kv(tokens: list[str]) -> dict[str, str]:
 
 def parse_duration(s: str, ppq: int) -> int:
     """
-    Convertit une durée MTML en ticks.
-    Exemples : "1" → ppq, "1/2" → ppq//2, "4" → ppq*4, "t240" → 240
+    Convert an MTML duration to ticks.
+    Examples: "1" → ppq, "1/2" → ppq//2, "4" → ppq*4, "t240" → 240
     """
     s = s.strip()
     if s.startswith("t"):
         try:
             return int(s[1:])
         except ValueError:
-            log.warning("Durée en ticks invalide : %s, noire par défaut", s)
+            log.warning("Invalid tick duration: %s, defaulting to a quarter note", s)
             return ppq
 
     try:
@@ -141,18 +141,18 @@ def parse_duration(s: str, ppq: int) -> int:
         ticks = int(frac * ppq)
         return max(1, ticks)
     except (ValueError, ZeroDivisionError):
-        log.warning("Durée invalide : %s, noire par défaut", s)
+        log.warning("Invalid duration: %s, defaulting to a quarter note", s)
         return ppq
 
 
 def pitch_to_midi(pitch_str: str) -> Optional[int]:
     """
-    Convertit un pitch MTML (ex : C4, F#3, Bb5) en numéro MIDI.
+    Convert an MTML pitch (e.g. C4, F#3, Bb5) to a MIDI note number.
     C4 = 60.
     """
     m = RE_PITCH.match(pitch_str.strip())
     if not m:
-        log.warning("Pitch invalide : %s", pitch_str)
+        log.warning("Invalid pitch: %s", pitch_str)
         return None
     note_name, accidental, octave_str = m.group(1), m.group(2), m.group(3)
     base = NOTE_NAMES[note_name]
@@ -162,7 +162,7 @@ def pitch_to_midi(pitch_str: str) -> Optional[int]:
         base -= 1
     midi = (int(octave_str) + 1) * 12 + base
     if not 0 <= midi <= 127:
-        log.warning("Pitch MIDI hors plage [0-127] : %s → %d", pitch_str, midi)
+        log.warning("MIDI pitch out of range [0-127]: %s → %d", pitch_str, midi)
         return None
     return midi
 
@@ -173,26 +173,26 @@ def clamp_velocity(v: int) -> int:
 
 def parse_chord_symbol(symbol: str, octave: int = 4) -> tuple[Optional[int], list[int]]:
     """
-    Parse un symbole d'accord et retourne (bass_midi, [midi_notes]).
-    Ex : "Cmaj" → (None, [60, 64, 67])
+    Parse a chord symbol and return (bass_midi, [midi_notes]).
+    E.g.: "Cmaj" → (None, [60, 64, 67])
         "G7/B" → (47, [55, 59, 62, 65])
     """
-    # Basse spécifique (slash chord)
+    # Specific bass note (slash chord)
     bass_midi: Optional[int] = None
     slash_idx = symbol.rfind("/")
     if slash_idx > 0:
         bass_str = symbol[slash_idx + 1:]
         symbol_main = symbol[:slash_idx]
-        # La basse est une octave en dessous
+        # The bass is one octave below
         bass_pitch = pitch_to_midi(bass_str + str(octave - 1))
         bass_midi = bass_pitch
     else:
         symbol_main = symbol
 
-    # Fondamentale
+    # Root
     root_match = re.match(r"^([A-G][#b]?)", symbol_main)
     if not root_match:
-        log.warning("Symbole d'accord invalide : %s", symbol)
+        log.warning("Invalid chord symbol: %s", symbol)
         return None, []
 
     root_str = root_match.group(1)
@@ -202,7 +202,7 @@ def parse_chord_symbol(symbol: str, octave: int = 4) -> tuple[Optional[int], lis
 
     quality_str = symbol_main[len(root_str):]
 
-    # Normalisation de la qualité
+    # Quality normalization
     quality_map = {
         "":     "maj",
         "maj":  "maj",
@@ -226,26 +226,26 @@ def parse_chord_symbol(symbol: str, octave: int = 4) -> tuple[Optional[int], lis
     }
     quality = quality_map.get(quality_str)
     if quality is None:
-        log.warning("Qualité d'accord inconnue : '%s', accord majeur par défaut", quality_str)
+        log.warning("Unknown chord quality: '%s', defaulting to major", quality_str)
         quality = "maj"
 
     intervals = CHORD_INTERVALS[quality]
     notes = [root_midi + i for i in intervals]
-    # Filtrer hors plage
+    # Drop out-of-range notes
     notes = [n for n in notes if 0 <= n <= 127]
     return bass_midi, notes
 
 
 def apply_voicing(notes: list[int], voicing: str) -> list[int]:
-    """Applique un voicing à une liste de notes triées."""
+    """Apply a voicing to a sorted list of notes."""
     notes = sorted(notes)
     if voicing == "open":
-        # Monter la tierce d'une octave
+        # Raise the third by one octave
         if len(notes) >= 2:
             notes[1] += 12
         notes = sorted(notes)
     elif voicing == "drop2":
-        # Descendre la 2e voix en partant du haut d'une octave
+        # Drop the second voice from the top by one octave
         if len(notes) >= 2:
             notes[-2] -= 12
         notes = sorted(notes)
@@ -258,12 +258,12 @@ def apply_voicing(notes: list[int], voicing: str) -> list[int]:
 
 def parse_note_token_group(tokens: list[str], ppq: int) -> list[MtmlEvent]:
     """
-    Parse un groupe de tokens correspondant à une note N :
+    Parse a group of tokens describing an N note:
     N <pitch> <duration> <velocity> [options]
-    Retourne une liste d'un seul MtmlEvent.
+    Return a list containing a single MtmlEvent.
     """
     if len(tokens) < 4:
-        log.warning("Événement N incomplet : %s", tokens)
+        log.warning("Incomplete N event: %s", tokens)
         return []
 
     # tokens[0] == "N"
@@ -281,7 +281,7 @@ def parse_note_token_group(tokens: list[str], ppq: int) -> list[MtmlEvent]:
     try:
         velocity = clamp_velocity(int(vel_str))
     except ValueError:
-        log.warning("Vélocité invalide : %s, 80 par défaut", vel_str)
+        log.warning("Invalid velocity: %s, defaulting to 80", vel_str)
         velocity = 80
 
     tie = "tie" in options
@@ -313,10 +313,11 @@ def parse_note_token_group(tokens: list[str], ppq: int) -> list[MtmlEvent]:
 
 def parse_line_events(line: str, ppq: int) -> list[list[MtmlEvent]]:
     """
-    Parse une ligne d'événements, avec gestion de la polyphonie (|).
-    Retourne une liste de groupes ; chaque groupe est joué à la même position.
+    Parse an event line, handling polyphony (|).
+    Return one group per '|' segment; the caller merges them into a single
+    simultaneous group.
     """
-    # Splitter sur " | " (pipe entouré d'espaces) pour ne pas couper F#, Bb, etc.
+    # Split on '|' (and surrounding whitespace); '#' and 'b' in pitches are unaffected
     groups_raw = re.split(r'\s*\|\s*', line)
     groups: list[list[MtmlEvent]] = []
     for grp in groups_raw:
@@ -340,14 +341,14 @@ def parse_line_events(line: str, ppq: int) -> list[list[MtmlEvent]]:
             if evt:
                 groups.append([evt])
         else:
-            log.warning("Mot-clé inconnu sur ligne événement : %s", keyword)
+            log.warning("Unknown keyword on event line: %s", keyword)
     return groups
 
 
 def parse_chord_line(tokens: list[str], ppq: int) -> list[MtmlEvent]:
     """CHORD <symbole> <duration> <velocity> [voicing=X] [oct=N]"""
     if len(tokens) < 4:
-        log.warning("CHORD incomplet : %s", tokens)
+        log.warning("Incomplete CHORD: %s", tokens)
         return []
 
     symbol   = tokens[1]
@@ -391,13 +392,13 @@ def parse_chord_line(tokens: list[str], ppq: int) -> list[MtmlEvent]:
 def parse_cc_line(tokens: list[str], ppq: int) -> Optional[MtmlEvent]:
     """CC <num> <val> [t<pos>]"""
     if len(tokens) < 3:
-        log.warning("CC incomplet : %s", tokens)
+        log.warning("Incomplete CC: %s", tokens)
         return None
     try:
         cc_num = int(tokens[1])
         cc_val = clamp_velocity(int(tokens[2]))
     except ValueError:
-        log.warning("CC invalide : %s", tokens)
+        log.warning("Invalid CC: %s", tokens)
         return None
 
     cc_pos = 0
@@ -412,8 +413,8 @@ def parse_cc_line(tokens: list[str], ppq: int) -> Optional[MtmlEvent]:
 
 def parse_mtml(text: str) -> tuple[SongHeader, list[TrackDef]]:
     """
-    Parse le texte MTML complet.
-    Retourne (SongHeader, [TrackDef]).
+    Parse a complete MTML text.
+    Return (SongHeader, [TrackDef]).
     """
     song = SongHeader()
     tracks: list[TrackDef] = []
@@ -421,7 +422,6 @@ def parse_mtml(text: str) -> tuple[SongHeader, list[TrackDef]]:
     current_bar:   Optional[BarDef]   = None
 
     for raw_line in text.splitlines():
-        # Supprimer commentaires et espaces
         # Strip comments: # is comment only when preceded by whitespace or at line start
         line = re.sub(r"(?:^|(?<=\s))#.*$", "", raw_line).strip()
         if not line:
@@ -462,7 +462,7 @@ def parse_mtml(text: str) -> tuple[SongHeader, list[TrackDef]]:
         # ---- @BAR ----
         elif keyword == "@BAR":
             if current_track is None:
-                log.warning("@BAR sans @TRACK précédent, ignoré")
+                log.warning("@BAR without a preceding @TRACK, ignored")
                 continue
             kv = parse_kv(tokens[2:])
             bar_num = int(tokens[1]) if len(tokens) > 1 else 1
@@ -475,10 +475,10 @@ def parse_mtml(text: str) -> tuple[SongHeader, list[TrackDef]]:
             current_track.bars.append(bar)
             current_bar = bar
 
-        # ---- Événements (N, CHORD, REST, CC) ----
+        # ---- Events (N, CHORD, REST, CC) ----
         elif keyword in ("N", "CHORD", "REST", "CC"):
             if current_bar is None:
-                log.warning("Événement '%s' en dehors d'un @BAR, ignoré", keyword)
+                log.warning("Event '%s' outside of a @BAR, ignored", keyword)
                 continue
             groups = parse_line_events(line, song.ppq)
             # All '|'-separated segments of one line start at the same position,
@@ -488,13 +488,13 @@ def parse_mtml(text: str) -> tuple[SongHeader, list[TrackDef]]:
                 current_bar.events.append(merged)  # type: ignore[arg-type]
 
         else:
-            log.debug("Ligne ignorée (mot-clé inconnu) : %s", line)
+            log.debug("Line ignored (unknown keyword): %s", line)
 
     return song, tracks
 
 
 # ---------------------------------------------------------------------------
-# Conversion MIDI
+# MIDI conversion
 # ---------------------------------------------------------------------------
 
 def ticks_per_bar(song: SongHeader, bar: BarDef) -> int:
@@ -509,11 +509,11 @@ def tempo_to_microseconds(bpm: int) -> int:
 
 def bend_cents_to_midi(cents: int) -> int:
     """
-    Convertit des centièmes en valeur pitch bend MIDI 14 bits (0–16383, centre 8192).
-    Plage : ±200 cents = ±2 demi-tons (sensitivity standard).
+    Convert cents to a 14-bit MIDI pitch bend value (0–16383, center 8192).
+    Range: ±200 cents = ±2 semitones (standard sensitivity).
     """
     clamped = max(-200, min(200, cents))
-    # 8192 = centre, 8192/200 ≈ 40.96 unités par cent
+    # 8192 = center, 8192/200 ≈ 40.96 units per cent
     value = 8192 + int(clamped * 40.96)
     return max(0, min(16383, value))
 
@@ -521,7 +521,7 @@ def bend_cents_to_midi(cents: int) -> int:
 def build_midi(song: SongHeader, tracks: list[TrackDef]) -> mido.MidiFile:
     mid = mido.MidiFile(type=1, ticks_per_beat=song.ppq)
 
-    # Track 0 : tempo + métadonnées globales
+    # Track 0: tempo + global metadata
     meta_track = mido.MidiTrack()
     mid.tracks.append(meta_track)
     meta_track.append(mido.MetaMessage("set_tempo", tempo=tempo_to_microseconds(song.tempo), time=0))
@@ -538,11 +538,11 @@ def build_midi(song: SongHeader, tracks: list[TrackDef]) -> mido.MidiFile:
         mid.tracks.append(midi_track)
         ch = track_def.channel
 
-        # Nom de la piste
+        # Track name
         if track_def.name:
             midi_track.append(mido.MetaMessage("track_name", name=track_def.name, time=0))
 
-        # Programme + CC initiaux (time=0 = absolus)
+        # Program + initial CCs (time=0)
         midi_track.append(mido.Message("program_change", channel=ch,
                                         program=track_def.program, time=0))
         midi_track.append(mido.Message("control_change", channel=ch,
@@ -550,19 +550,19 @@ def build_midi(song: SongHeader, tracks: list[TrackDef]) -> mido.MidiFile:
         midi_track.append(mido.Message("control_change", channel=ch,
                                         control=10, value=track_def.pan, time=0))
 
-        # Construire la liste de messages (tick absolu, message)
+        # Build the message list as (absolute tick, message)
         abs_messages: list[tuple[int, mido.Message]] = []
 
         for bar in track_def.bars:
             bar_start_abs = (bar.number - 1) * ticks_per_bar(song, bar)
-            cursor = 0   # position relative dans la mesure (en ticks)
+            cursor = 0   # position relative to the bar start (ticks)
 
-            # Gérer les liaisons (tie) : pitch → tick de début du note_on
+            # Ties: pitch → tick of the note_on
             tied: dict[int, int] = {}
 
             for event_or_group in bar.events:
-                # Normaliser : chaque élément de bar.events est soit un MtmlEvent,
-                # soit une liste de MtmlEvent (groupe polyphonique)
+                # Normalize: each item of bar.events is either an MtmlEvent
+                # or a list of MtmlEvent (polyphonic group)
                 if isinstance(event_or_group, list):
                     group: list[MtmlEvent] = event_or_group
                 else:
@@ -592,9 +592,9 @@ def build_midi(song: SongHeader, tracks: list[TrackDef]) -> mido.MidiFile:
                         msb = (bend_val >> 7) & 0x7F
                         abs_messages.append((abs_pos, mido.Message(
                             "pitchwheel", channel=ch,
-                            pitch=bend_val - 8192)))  # mido attend -8192..8191
+                            pitch=bend_val - 8192)))  # mido expects -8192..8191
 
-                    # CC inline
+                    # Inline CC
                     for cc_num, cc_val in evt.inline_cc:
                         abs_messages.append((abs_pos, mido.Message(
                             "control_change", channel=ch,
@@ -604,13 +604,13 @@ def build_midi(song: SongHeader, tracks: list[TrackDef]) -> mido.MidiFile:
                     note_off_tick = abs_pos + evt.duration_ticks
 
                     if evt.tie:
-                        # Stocker pour prolongation
+                        # Remember it to extend the note
                         tied[evt.midi_note] = note_on_tick
                         abs_messages.append((note_on_tick, mido.Message(
                             "note_on", channel=ch,
                             note=evt.midi_note, velocity=evt.velocity)))
                     elif evt.midi_note in tied:
-                        # Fin de liaison : note_off maintenant
+                        # End of tie: emit only the note_off
                         abs_messages.append((note_off_tick, mido.Message(
                             "note_off", channel=ch,
                             note=evt.midi_note, velocity=0)))
@@ -627,13 +627,13 @@ def build_midi(song: SongHeader, tracks: list[TrackDef]) -> mido.MidiFile:
 
                 cursor += max_dur
 
-            # Fermer les liaisons encore ouvertes en fin de bar
+            # Close ties still open at the end of the bar
             bar_end = bar_start_abs + ticks_per_bar(song, bar)
             for note, _ in tied.items():
                 abs_messages.append((bar_end, mido.Message(
                     "note_off", channel=ch, note=note, velocity=0)))
 
-        # Trier par tick absolu, note_off avant note_on au même tick
+        # Sort by absolute tick, note_off before note_on at the same tick
         def sort_key(item: tuple[int, mido.Message]) -> tuple[int, int]:
             tick, msg = item
             prio = 0 if msg.type == "note_off" else 1
@@ -641,7 +641,7 @@ def build_midi(song: SongHeader, tracks: list[TrackDef]) -> mido.MidiFile:
 
         abs_messages.sort(key=sort_key)
 
-        # Convertir en delta-time
+        # Convert to delta times
         prev_tick = 0
         for abs_tick, msg in abs_messages:
             delta = abs_tick - prev_tick
@@ -654,20 +654,20 @@ def build_midi(song: SongHeader, tracks: list[TrackDef]) -> mido.MidiFile:
 
 
 # ---------------------------------------------------------------------------
-# Interface publique
+# Public API
 # ---------------------------------------------------------------------------
 
 def convert(mtml_text: str, output_path: str | Path, verbose: bool = False) -> mido.MidiFile:
     """
-    Parse du texte MTML et écrit un fichier MIDI.
+    Parse MTML text and write a MIDI file.
 
     Args:
-        mtml_text:   Contenu MTML sous forme de chaîne.
-        output_path: Chemin du fichier .mid à créer.
-        verbose:     Si True, active les logs WARNING+.
+        mtml_text:   MTML content as a string.
+        output_path: Path of the .mid file to create.
+        verbose:     If True, enable DEBUG logs.
 
     Returns:
-        L'objet MidiFile généré.
+        The generated MidiFile object.
     """
     if verbose:
         log.setLevel(logging.DEBUG)
@@ -675,11 +675,11 @@ def convert(mtml_text: str, output_path: str | Path, verbose: bool = False) -> m
     song, tracks = parse_mtml(mtml_text)
 
     if not tracks:
-        raise ValueError("Aucune track trouvée dans le fichier MTML.")
+        raise ValueError("No track found in the MTML file.")
 
     mid = build_midi(song, tracks)
     mid.save(str(output_path))
-    log.warning("MIDI écrit : %s (%d tracks, tempo=%d BPM, PPQ=%d)",
+    log.warning("MIDI written: %s (%d tracks, tempo=%d BPM, PPQ=%d)",
                 output_path, len(tracks), song.tempo, song.ppq)
     return mid
 
@@ -688,23 +688,23 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Convertisseur MTML v1.0 → MIDI",
+        description="MTML v1.0 → MIDI converter",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Exemples :
+Examples:
   python mtml_to_midi.py composition.mtml output.mid
   python mtml_to_midi.py composition.mtml output.mid --verbose
         """,
     )
-    parser.add_argument("input",  help="Fichier .mtml source")
-    parser.add_argument("output", help="Fichier .mid de sortie")
+    parser.add_argument("input",  help="Source .mtml file")
+    parser.add_argument("output", help="Output .mid file")
     parser.add_argument("--verbose", "-v", action="store_true",
-                        help="Afficher les avertissements et infos de debug")
+                        help="Show debug logs")
     args = parser.parse_args()
 
     input_path = Path(args.input)
     if not input_path.exists():
-        print(f"Erreur : fichier introuvable : {input_path}", file=sys.stderr)
+        print(f"Error: file not found: {input_path}", file=sys.stderr)
         sys.exit(1)
 
     text = input_path.read_text(encoding="utf-8")
@@ -712,9 +712,9 @@ Exemples :
         mid = convert(text, args.output, verbose=args.verbose)
         duration_sec = mid.length
         print(f"✓ {args.output} — {len(mid.tracks)-1} track(s), "
-              f"durée ≈ {duration_sec:.1f}s")
+              f"duration ≈ {duration_sec:.1f}s")
     except Exception as exc:
-        print(f"Erreur de conversion : {exc}", file=sys.stderr)
+        print(f"Conversion error: {exc}", file=sys.stderr)
         sys.exit(1)
 
 

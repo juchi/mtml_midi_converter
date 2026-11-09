@@ -52,7 +52,7 @@ Verify before relying on these; fix them only when asked.
 
 ## Conventions
 
-- Code, comments and documentation in English. Existing code comments and log messages are in French; translate them when touching that code rather than adding more French.
+- Code, comments, log messages and documentation in English.
 - Keep the lenient error strategy from spec section 9: warn and continue, never crash on bad input lines.
 - Unknown keys/keywords must stay silently ignored (forward compatibility).
 - When changing the format, update `MTML_spec.md` alongside the code.
